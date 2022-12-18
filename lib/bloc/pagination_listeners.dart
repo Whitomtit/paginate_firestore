@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/widgets.dart';
 
 class PaginateChangeListener extends ChangeNotifier {}
@@ -33,5 +34,20 @@ class PaginateFilterChangeListener extends PaginateChangeListener {
 
   String get searchTerm {
     return _filterTerm;
+  }
+}
+
+class QueryChangeListener<T extends Object?> extends PaginateChangeListener {
+  Query<T> _query;
+
+  QueryChangeListener(this._query);
+
+  set query(Query<T> query) {
+    _query = query;
+    notifyListeners();
+  }
+
+  Query<T> get query {
+    return _query;
   }
 }

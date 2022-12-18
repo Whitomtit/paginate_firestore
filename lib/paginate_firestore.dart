@@ -19,8 +19,7 @@ class PaginateFirestore extends StatefulWidget {
   const PaginateFirestore({
     Key? key,
     required this.itemBuilder,
-    required this.query,
-    required this.itemBuilderType,
+    required this.queryProvider,
     this.gridDelegate =
         const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2),
     this.startAfterDocument,
@@ -54,12 +53,11 @@ class PaginateFirestore extends StatefulWidget {
   final Widget onEmpty;
   final SliverGridDelegate gridDelegate;
   final Widget initialLoader;
-  final PaginateBuilderType itemBuilderType;
   final int itemsPerPage;
   final List<ChangeNotifier>? listeners;
   final EdgeInsets padding;
   final ScrollPhysics? physics;
-  final Query query;
+  final QueryChangeListener queryProvider;
   final bool reverse;
   final bool allowImplicitScrolling;
   final ScrollViewKeyboardDismissBehavior keyboardDismissBehavior;
@@ -101,8 +99,10 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
     return BlocBuilder<PaginationCubit, PaginationState>(
       bloc: _cubit,
       builder: (context, state) {
+        Widget? overrideWidget;
+        PaginationLoaded? loadedState;
         if (state is PaginationInitial) {
-          return _buildWithScrollView(context, widget.initialLoader);
+          overrideWidget = widget.initialLoader;
         } else if (state is PaginationError) {
           return _buildWithScrollView(
               context,
@@ -110,7 +110,7 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
                   ? widget.onError!(state.error)
                   : ErrorDisplay(exception: state.error));
         } else {
-          final loadedState = state as PaginationLoaded;
+          loadedState = state as PaginationLoaded;
           if (widget.onLoaded != null) {
             widget.onLoaded!(loadedState);
           }
@@ -119,14 +119,10 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
           }
 
           if (loadedState.documentSnapshots.isEmpty) {
-            return _buildWithScrollView(context, widget.onEmpty);
+            overrideWidget = widget.onEmpty;
           }
-          return widget.itemBuilderType == PaginateBuilderType.listView
-              ? _buildListView(loadedState)
-              : widget.itemBuilderType == PaginateBuilderType.gridView
-                  ? _buildGridView(loadedState)
-                  : _buildPageView(loadedState);
         }
+        return _buildListView(loadedState, overrideWidget: overrideWidget);
       },
     );
   }
@@ -168,66 +164,26 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
       }
     }
 
+    widget.queryProvider.addListener(() {
+      setState(() {
+        _updateQuery(widget.queryProvider.query);
+      });
+    });
+    _updateQuery(widget.queryProvider.query);
+    super.initState();
+  }
+
+  _updateQuery(Query query) {
     _cubit = PaginationCubit(
-      widget.query,
+      query,
       widget.itemsPerPage,
       widget.startAfterDocument,
       isLive: widget.isLive,
     )..fetchPaginatedList();
-    super.initState();
   }
 
-  Widget _buildGridView(PaginationLoaded loadedState) {
-    var gridView = CustomScrollView(
-      reverse: widget.reverse,
-      controller: widget.scrollController,
-      shrinkWrap: widget.shrinkWrap,
-      scrollDirection: widget.scrollDirection,
-      physics: widget.physics,
-      keyboardDismissBehavior: widget.keyboardDismissBehavior,
-      slivers: [
-        if (widget.header != null) widget.header!,
-        SliverPadding(
-          padding: widget.padding,
-          sliver: SliverGrid(
-            gridDelegate: widget.gridDelegate,
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                if (index >= loadedState.documentSnapshots.length) {
-                  _cubit!.fetchPaginatedList();
-                  return widget.bottomLoader;
-                }
-                return widget.itemBuilder(
-                  context,
-                  loadedState.documentSnapshots,
-                  index,
-                );
-              },
-              childCount: loadedState.hasReachedEnd
-                  ? loadedState.documentSnapshots.length
-                  : loadedState.documentSnapshots.length + 1,
-            ),
-          ),
-        ),
-        if (widget.footer != null) widget.footer!,
-      ],
-    );
-
-    if (widget.listeners != null && widget.listeners!.isNotEmpty) {
-      return MultiProvider(
-        providers: widget.listeners!
-            .map((_listener) => ChangeNotifierProvider(
-                  create: (context) => _listener,
-                ))
-            .toList(),
-        child: gridView,
-      );
-    }
-
-    return gridView;
-  }
-
-  Widget _buildListView(PaginationLoaded loadedState) {
+  Widget _buildListView(PaginationLoaded? loadedState,
+      {Widget? overrideWidget}) {
     var listView = CustomScrollView(
       reverse: widget.reverse,
       controller: widget.scrollController,
@@ -237,42 +193,48 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
       keyboardDismissBehavior: widget.keyboardDismissBehavior,
       slivers: [
         if (widget.header != null) widget.header!,
-        SliverPadding(
-          padding: widget.padding,
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final itemIndex = index ~/ 2;
-                if (index.isEven) {
-                  if (itemIndex >= loadedState.documentSnapshots.length) {
-                    _cubit!.fetchPaginatedList();
-                    return widget.bottomLoader;
-                  }
-                  return widget.itemBuilder(
-                    context,
-                    loadedState.documentSnapshots,
-                    itemIndex,
-                  );
-                }
-                return widget.separator;
-              },
-              semanticIndexCallback: (widget, localIndex) {
-                if (localIndex.isEven) {
-                  return localIndex ~/ 2;
-                }
-                // ignore: avoid_returning_null
-                return null;
-              },
-              childCount: max(
-                  0,
-                  (loadedState.hasReachedEnd
-                              ? loadedState.documentSnapshots.length
-                              : loadedState.documentSnapshots.length + 1) *
-                          2 -
-                      1),
-            ),
-          ),
-        ),
+        (overrideWidget != null)
+            ? SliverToBoxAdapter(child: overrideWidget)
+            : (loadedState != null)
+                ? SliverPadding(
+                    padding: widget.padding,
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final itemIndex = index ~/ 2;
+                          if (index.isEven) {
+                            if (itemIndex >=
+                                loadedState.documentSnapshots.length) {
+                              _cubit!.fetchPaginatedList();
+                              return widget.bottomLoader;
+                            }
+                            return widget.itemBuilder(
+                              context,
+                              loadedState.documentSnapshots,
+                              itemIndex,
+                            );
+                          }
+                          return widget.separator;
+                        },
+                        semanticIndexCallback: (widget, localIndex) {
+                          if (localIndex.isEven) {
+                            return localIndex ~/ 2;
+                          }
+                          // ignore: avoid_returning_null
+                          return null;
+                        },
+                        childCount: max(
+                            0,
+                            (loadedState.hasReachedEnd
+                                        ? loadedState.documentSnapshots.length
+                                        : loadedState.documentSnapshots.length +
+                                            1) *
+                                    2 -
+                                1),
+                      ),
+                    ),
+                  )
+                : Container(),
         if (widget.footer != null) widget.footer!,
       ],
     );
@@ -289,49 +251,6 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
     }
 
     return listView;
-  }
-
-  Widget _buildPageView(PaginationLoaded loadedState) {
-    var pageView = Padding(
-      padding: widget.padding,
-      child: PageView.custom(
-        reverse: widget.reverse,
-        allowImplicitScrolling: widget.allowImplicitScrolling,
-        controller: widget.pageController,
-        scrollDirection: widget.scrollDirection,
-        physics: widget.physics,
-        onPageChanged: widget.onPageChanged,
-        childrenDelegate: SliverChildBuilderDelegate(
-          (context, index) {
-            if (index >= loadedState.documentSnapshots.length) {
-              _cubit!.fetchPaginatedList();
-              return widget.bottomLoader;
-            }
-            return widget.itemBuilder(
-              context,
-              loadedState.documentSnapshots,
-              index,
-            );
-          },
-          childCount: loadedState.hasReachedEnd
-              ? loadedState.documentSnapshots.length
-              : loadedState.documentSnapshots.length + 1,
-        ),
-      ),
-    );
-
-    if (widget.listeners != null && widget.listeners!.isNotEmpty) {
-      return MultiProvider(
-        providers: widget.listeners!
-            .map((_listener) => ChangeNotifierProvider(
-                  create: (context) => _listener,
-                ))
-            .toList(),
-        child: pageView,
-      );
-    }
-
-    return pageView;
   }
 }
 

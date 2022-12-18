@@ -1,7 +1,8 @@
-import 'package:flutter/material.dart';
-import 'package:paginate_firestore/paginate_firestore.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+import 'package:paginate_firestore/bloc/pagination_listeners.dart';
+import 'package:paginate_firestore/paginate_firestore.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,8 +43,6 @@ class HomePage extends StatelessWidget {
           header: const SliverToBoxAdapter(child: Text('HEADER')),
           footer: const SliverToBoxAdapter(child: Text('FOOTER')),
           // item builder type is compulsory.
-          itemBuilderType:
-              PaginateBuilderType.listView, //Change types accordingly
           itemBuilder: (context, documentSnapshots, index) {
             final data = documentSnapshots[index].data() as Map?;
             return ListTile(
@@ -55,7 +54,8 @@ class HomePage extends StatelessWidget {
             );
           },
           // orderBy is compulsory to enable pagination
-          query: FirebaseFirestore.instance.collection('users').orderBy('name'),
+          queryProvider: QueryChangeListener(
+              FirebaseFirestore.instance.collection('users').orderBy('name')),
           itemsPerPage: 5,
           // to fetch real-time data
           isLive: true,
