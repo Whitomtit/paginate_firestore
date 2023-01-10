@@ -139,6 +139,7 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
 
   @override
   void dispose() {
+    widget.queryProvider.removeListener(queryListener);
     widget.scrollController?.dispose();
     _cubit?.dispose();
     super.dispose();
@@ -164,13 +165,15 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
       }
     }
 
-    widget.queryProvider.addListener(() {
-      setState(() {
-        _updateQuery(widget.queryProvider.query);
-      });
-    });
+    widget.queryProvider.addListener(queryListener);
     _updateQuery(widget.queryProvider.query);
     super.initState();
+  }
+
+  queryListener() {
+    setState(() {
+      _updateQuery(widget.queryProvider.query);
+    });
   }
 
   _updateQuery(Query query) {
